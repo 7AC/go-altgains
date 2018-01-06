@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"sort"
@@ -13,6 +14,7 @@ const (
 	BNB  = "BNB"
 	BTC  = "BTC"
 	ETH  = "ETH"
+	LTC  = "LTC"
 	USDT = "USDT"
 )
 
@@ -26,6 +28,18 @@ var (
 )
 
 func main() {
+	costBTC := flag.Float64("costBTC", 0,
+		"average price for BTC in USDT if purchased outside exchange")
+	costETH := flag.Float64("costETH", 0,
+		"average price for ETH in USDT if purchased outside exchange")
+	costLTC := flag.Float64("costLTC", 0,
+		"average price for LTC in USDT if purchased outside exchange")
+	flag.Parse()
+	importedCosts := map[string]float64{
+		BTC: *costBTC,
+		ETH: *costETH,
+		LTC: *costLTC,
+	}
 	client := binance.New(os.Getenv("BINANCE_KEY"), os.Getenv("BINANCE_SECRET"))
 	allPrices, err := client.GetAllPrices()
 	if err != nil {
@@ -90,6 +104,12 @@ func main() {
 		if avgCostBTC > 0 {
 			gainBTC = assetPriceBTC - avgCostBTC
 			gainPct = gainBTC / avgCostBTC
+		} else {
+			if importedCost, found := importedCosts[position.Asset]; found {
+				avgCostBTC = importedCost / btcPriceUSDT
+				gainBTC = avgCostBTC
+				gainPct = gainBTC / avgCostBTC
+			}
 		}
 		totalGainBTC := gainBTC * totalBalance
 		totalGainUSDT := totalGainBTC * btcPriceUSDT
