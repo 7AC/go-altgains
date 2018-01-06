@@ -5,13 +5,14 @@
 Requires [Go](https://golang.org/dl/) and [go-binance](https://github.com/pdepip/go-binance):
 
 ```bash
-go get github.com/pdepip/go-binance/binance
+$ go get github.com/pdepip/go-binance/binance
 ```
 
 ## Usage
 
-```
-$ go run github.com/7AC/go-altgains/altgains.go
+```bash
+$ go get github.com/pdepip/go-binance/binance
+$ go run $GOPATH/src/github.com/7AC/go-altgains/altgains.go
 Coin  Total Balance  Available Balance  In Order  BTC Value  BTC Gain   USDT Value  USDT Gain  % Gain
 ADA   305.694000     305.694000         0.000000  0.018449   +0.018274  313.79      +310.83    +104.82
 BTC   0.155645       0.155645           0.000000  0.155645   -0.102273  412.05      -1739.56   -0.81
