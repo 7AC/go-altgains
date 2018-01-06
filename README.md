@@ -8,7 +8,7 @@ Requires [Go](https://golang.org/dl/) and [go-binance](https://github.com/pdepip
 go get github.com/pdepip/go-binance/binance
 ```
 
-# Usage
+## Usage
 
 ```
 $ go run altgains.go
@@ -26,3 +26,6 @@ XRP   242.757000     242.757000         0.000000  0.037443   +0.036835  636.87  
 Total BTC Value: 0.631443                                                                       
 Total USDT Value: 10740.21                            
 ```
+
+## Supported exchanges
+For now only [Binance](binance.com).

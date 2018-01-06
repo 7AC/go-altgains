@@ -97,7 +97,13 @@ func main() {
 	}
 
 	// Init client.
-	client := binance.New(os.Getenv("BINANCE_KEY"), os.Getenv("BINANCE_SECRET"))
+	key := os.Getenv("BINANCE_KEY")
+	secret := os.Getenv("BINANCE_SECRET")
+	if key == "" || secret == "" {
+		fmt.Errorf("please set $BINANCE_KEY and $BINANCE_SECRET")
+		return
+	}
+	client := binance.New(key, secret)
 
 	// Get all prices.
 	prices, err := getPrices(client)
