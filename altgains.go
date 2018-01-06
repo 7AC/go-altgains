@@ -27,38 +27,23 @@ var (
 	}
 )
 
-func main() {
-	costBTC := flag.Float64("costBTC", 0,
-		"average price for BTC in USDT if purchased outside exchange")
-	costETH := flag.Float64("costETH", 0,
-		"average price for ETH in USDT if purchased outside exchange")
-	costLTC := flag.Float64("costLTC", 0,
-		"average price for LTC in USDT if purchased outside exchange")
-	flag.Parse()
-	importedCosts := map[string]float64{
-		BTC: *costBTC,
-		ETH: *costETH,
-		LTC: *costLTC,
-	}
-	client := binance.New(os.Getenv("BINANCE_KEY"), os.Getenv("BINANCE_SECRET"))
+func getPrices(client *binance.Binance) (map[string]binance.TickerPrice, error) {
 	allPrices, err := client.GetAllPrices()
 	if err != nil {
-		fmt.Errorf(err.Error())
-		return
+		return nil, err
 	}
 	prices := map[string]binance.TickerPrice{}
 	for _, price := range allPrices {
 		prices[price.Symbol] = price
 	}
-	btcPriceUSDT := prices[BTC+USDT].Price
+	return prices, nil
+}
+
+func getPositions(client *binance.Binance) ([]string, map[string]binance.Balance, error) {
 	positions, err := client.GetPositions()
 	if err != nil {
-		fmt.Errorf(err.Error())
-		return
+		return nil, nil, err
 	}
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "Coin\tTotal Balance\tAvailable Balance\tIn Order\tBTC Value\tBTC Gain"+
-		"\tUSDT Value\tUSDT Gain\t% Gain")
 	assets := []string{}
 	positionMap := map[string]binance.Balance{}
 	for _, position := range positions {
@@ -66,57 +51,119 @@ func main() {
 		positionMap[position.Asset] = position
 	}
 	sort.Strings(assets)
-	var totalBTC float64
-	for _, asset := range assets {
-		position := positionMap[asset]
-		var quantity float64
-		var costBasisBTC float64
-		for base := range baseCurrencies {
-			trades, err := client.GetTrades(position.Asset + base)
-			if err != nil {
-				continue
-			}
-			for _, trade := range trades {
-				if trade.IsBuyer {
-					quantity += trade.Quantity
-					if base == BTC {
-						costBasisBTC += trade.Price
-					} else {
-						costBasisBTC += trade.Price * prices[base+BTC].Price
-					}
+	return assets, positionMap, nil
+}
+
+func getAverageCost(client *binance.Binance, position binance.Balance,
+	prices map[string]binance.TickerPrice) float64 {
+	var quantity float64
+	var costBasis float64
+	for base := range baseCurrencies {
+		trades, err := client.GetTrades(position.Asset + base)
+		if err != nil {
+			continue
+		}
+		for _, trade := range trades {
+			if trade.IsBuyer {
+				// Calculate the total cost basis in buy operations, to compute the average price
+				// we bought at. When we sell there's not way to keep track which coin we used in
+				// the pool so this is the best we can do.
+				quantity += trade.Quantity
+				if base == BTC {
+					costBasis += trade.Price
+				} else {
+					costBasis += trade.Price * prices[base+BTC].Price
 				}
 			}
 		}
-		avgCostBTC := costBasisBTC / quantity
+	}
+	return costBasis / quantity
+}
+
+func main() {
+	costBTC := flag.Float64("btc_price", 0,
+		"average price for BTC in USDT if purchased outside exchange")
+	costETH := flag.Float64("eth_price", 0,
+		"average price for ETH in USDT if purchased outside exchange")
+	costLTC := flag.Float64("ltc_price", 0,
+		"average price for LTC in USDT if purchased outside exchange")
+	flag.Parse()
+
+	// Import costs not on binance.
+	importedCosts := map[string]float64{
+		BTC: *costBTC,
+		ETH: *costETH,
+		LTC: *costLTC,
+	}
+
+	// Init client.
+	client := binance.New(os.Getenv("BINANCE_KEY"), os.Getenv("BINANCE_SECRET"))
+
+	// Get all prices.
+	prices, err := getPrices(client)
+	if err != nil {
+		fmt.Errorf(err.Error())
+		return
+	}
+	btcPriceUSDT := prices[BTC+USDT].Price
+
+	// Get positions.
+	assets, positions, err := getPositions(client)
+	if err != nil {
+		fmt.Errorf(err.Error())
+		return
+	}
+
+	var totalBTC float64
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "Coin\tTotal Balance\tAvailable Balance\tIn Order\tBTC Value\tBTC Gain"+
+		"\tUSDT Value\tUSDT Gain\t% Gain")
+	for _, asset := range assets {
+		position := positions[asset]
+
+		// Get the average cost.
+		avgCost := getAverageCost(client, position, prices)
+
+		// Compute current price.
 		totalBalance := position.Free + position.Locked
-		var assetPriceBTC float64
-		var valueBTC float64
+		var price float64
+		var value float64
 		if position.Asset == BTC {
-			assetPriceBTC = totalBalance
-			valueBTC = totalBalance
+			price = totalBalance
+			value = totalBalance
 		} else {
-			assetPriceBTC = prices[position.Asset+BTC].Price
-			valueBTC = totalBalance * assetPriceBTC
+			price = prices[position.Asset+BTC].Price
+			value = totalBalance * price
 		}
-		var gainBTC float64
+
+		// Compute gains.
+		var gain float64
 		var gainPct float64
-		// TODO: support importing cost basis.
-		if avgCostBTC > 0 {
-			gainBTC = assetPriceBTC - avgCostBTC
-			gainPct = gainBTC / avgCostBTC
-		} else {
-			if importedCost, found := importedCosts[position.Asset]; found {
-				avgCostBTC = importedCost / btcPriceUSDT
-				gainBTC = avgCostBTC
-				gainPct = gainBTC / avgCostBTC
+		importedCost, importedCostFound := importedCosts[position.Asset]
+		if avgCost > 0 {
+			if importedCostFound {
+				fmt.Errorf("coins both imported and traded are not supported (%s)", position.Asset)
+				return
 			}
+			gain = price - avgCost
+		} else if importedCostFound {
+			avgCost = importedCost / btcPriceUSDT
+			gain += price - avgCost
 		}
-		totalGainBTC := gainBTC * totalBalance
-		totalGainUSDT := totalGainBTC * btcPriceUSDT
-		totalBTC += valueBTC
-		fmt.Fprintf(w, "%s\t%f\t%f\t%f\t%f\t%f\t%.2f\t%.2f\t%.2f\n", position.Asset, totalBalance,
-			position.Free, position.Locked, valueBTC, totalGainBTC,
-			totalBalance*assetPriceBTC*btcPriceUSDT, totalGainUSDT, gainPct)
+		gainPct = gain / avgCost
+		totalGain := gain * totalBalance
+		totalGainUSDT := totalGain * btcPriceUSDT
+		totalBTC += value
+		totalGainStr := fmt.Sprintf("%f", totalGain)
+		totalGainUSDTStr := fmt.Sprintf("%.2f", totalGainUSDT)
+		gainPctStr := fmt.Sprintf("%.2f", gainPct)
+		if totalGain > 0 {
+			totalGainStr = "+" + totalGainStr
+			totalGainUSDTStr = "+" + totalGainUSDTStr
+			gainPctStr = "+" + gainPctStr
+		}
+		fmt.Fprintf(w, "%s\t%f\t%f\t%f\t%f\t%s\t%.2f\t%s\t%s\n", position.Asset, totalBalance,
+			position.Free, position.Locked, value, totalGainStr, totalBalance*price*btcPriceUSDT, totalGainUSDTStr, gainPctStr)
 	}
 	fmt.Fprintln(w)
 	w.Flush()
