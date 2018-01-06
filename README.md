@@ -28,4 +28,4 @@ Total USDT Value: 10740.21
 ```
 
 ## Supported exchanges
-For now only [Binance](binance.com).
+For now only [Binance](http://binance.com).
